@@ -2,39 +2,24 @@ const express = require("express")
 const mongoose = require("mongoose")
 require("dotenv").config()
 
+const passport = require("./config/passport.config")
+
 const app = express()
 
-// Routers
-const authRouter = require("./routers/auth.router")
-const productsRouter = require("./routers/products.router")
-const cartsRouter = require("./routers/carts.router")
-
-// Middlewares
 app.use(express.json())
-app.use(express.urlencoded({ extended: true }))
+app.use(passport.initialize())
 
-// Test route
-app.get("/", (req, res) => {
-  res.send("Servidor funcionando correctamente")
+// Routers
+app.use("/api/auth", require("./routers/auth.router"))
+app.use("/api/products", require("./routers/products.router"))
+app.use("/api/carts", require("./routers/carts.router"))
+
+app.get("/", (req,res)=>{
+  res.send("Servidor funcionando")
 })
 
-// Conectar MongoDB
 mongoose.connect(process.env.MONGO_URL)
-.then(() => {
-  console.log("MongoDB conectado")
-})
-.catch((error) => {
-  console.log("Error MongoDB:", error)
-})
+.then(()=>console.log("Mongo conectado"))
 
-// Rutas
-app.use("/api/auth", authRouter)
-app.use("/api/products", productsRouter)
-app.use("/api/carts", cartsRouter)
-
-// Puerto
 const PORT = process.env.PORT || 8080
-
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`)
-})
+app.listen(PORT, ()=>console.log("Servidor en puerto " + PORT))

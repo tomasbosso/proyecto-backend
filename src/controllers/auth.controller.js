@@ -1,103 +1,136 @@
-const bcrypt=require("bcrypt")
+const jwt = require("jsonwebtoken")
+const UserDTO = require("../dto/user.dto")
+const transporter = require("../config/mail.config")
+const crypto = require("crypto")
 
-const jwt=require("jsonwebtoken")
+const users = []
 
-const {v4:uuidv4}=require("uuid")
+const resetTokens = []
 
-const User=require("../models/User")
+exports.register = (req, res) => {
 
-const UserDTO=require("../dto/user.dto")
+  const { email, password } = req.body
 
-const sendResetEmail=require("../services/mail.service")
+  if (!email || !password) {
+    return res.status(400).json({ error: "Faltan datos" })
+  }
 
-const {JWT_SECRET,BASE_URL}=require("../config/config")
+  const exists = users.find(u => u.email === email)
 
-exports.register=async(req,res)=>{
+  if (exists) {
+    return res.status(400).json({ error: "Usuario ya existe" })
+  }
 
-const hashed=await bcrypt.hash(req.body.password,10)
+  const user = {
+    id: users.length + 1,
+    email,
+    password,
+    role: "admin"
+  }
 
-const user=await User.create({...req.body,password:hashed})
+  users.push(user)
 
-res.json(user)
+  res.json({ message: "Usuario registrado" })
+}
+
+exports.login = (req, res) => {
+
+  const { email, password } = req.body
+
+  const user = users.find(u => u.email === email)
+
+  if (!user || user.password !== password) {
+    return res.status(401).json({ error: "Credenciales incorrectas" })
+  }
+
+  const token = jwt.sign(
+    {
+      id: user.id,
+      email: user.email,
+      role: user.role
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: "1h" }
+  )
+
+  res.json({ message: "Login correcto", token })
+}
+
+exports.current = (req, res) => {
+
+  res.json(new UserDTO(req.user))
 
 }
 
-exports.login=async(req,res)=>{
+exports.recoverPassword = async (req, res) => {
 
-const user=await User.findOne({email:req.body.email})
+  const { email } = req.body
 
-if(!user) return res.status(404).json({error:"user not found"})
+  const user = users.find(u => u.email === email)
 
-const valid=await bcrypt.compare(req.body.password,user.password)
+  if (!user) {
+    return res.status(404).json({ error: "Usuario no encontrado" })
+  }
 
-if(!valid) return res.status(401).json({error:"wrong password"})
+  const token = crypto.randomBytes(20).toString("hex")
 
-const token=jwt.sign({
+  const expiration = Date.now() + 3600000 // 1 hora
 
-id:user._id,
+  resetTokens.push({
+    token,
+    userId: user.id,
+    expires: expiration
+  })
 
-role:user.role,
+  const resetLink = `http://localhost:8080/api/auth/reset-password/${token}`
 
-email:user.email
+  try {
 
-},JWT_SECRET,{expiresIn:"1h"})
+    await transporter.sendMail({
+      from: process.env.MAIL_USER,
+      to: email,
+      subject: "Recuperación de contraseña",
+      html: `
+        <h3>Recuperar contraseña</h3>
+        <a href="${resetLink}">Restablecer contraseña</a>
+      `
+    })
 
-res.json({token})
+  } catch (error) {
+    console.log("Error enviando mail (simulado igual):", error.message)
+  }
 
+  console.log("LINK DE RECUPERACIÓN:", resetLink)
+
+  res.json({ message: "Email enviado" })
 }
 
-exports.current=async(req,res)=>{
+exports.resetPassword = (req, res) => {
 
-const user=await User.findById(req.user.id)
+  const { token } = req.params
+  const { newPassword } = req.body
 
-res.json(new UserDTO(user))
+  const tokenData = resetTokens.find(t => t.token === token)
 
-}
+  if (!tokenData) {
+    return res.status(400).json({ error: "Token inválido" })
+  }
 
-exports.forgotPassword=async(req,res)=>{
+  if (Date.now() > tokenData.expires) {
+    return res.status(400).json({ error: "Token expirado" })
+  }
 
-const user=await User.findOne({email:req.body.email})
+  const user = users.find(u => u.id === tokenData.userId)
 
-if(!user) return res.status(404).json({error:"no existe"})
+  if (!user) {
+    return res.status(404).json({ error: "Usuario no encontrado" })
+  }
 
-const token=uuidv4()
+  if (user.password === newPassword) {
+    return res.status(400).json({ error: "No podés usar la misma contraseña" })
+  }
 
-user.resetToken=token
+  user.password = newPassword
 
-user.resetTokenExpire=Date.now()+3600000
-
-await user.save()
-
-await sendResetEmail(user.email,token,BASE_URL)
-
-res.json({message:"email enviado"})
-
-}
-
-exports.resetPassword=async(req,res)=>{
-
-const user=await User.findOne({
-
-resetToken:req.params.token,
-
-resetTokenExpire:{$gt:Date.now()}
-
-})
-
-if(!user) return res.status(400).json({error:"token invalido"})
-
-const same=await bcrypt.compare(req.body.password,user.password)
-
-if(same) return res.status(400).json({error:"no puede repetir contraseña"})
-
-user.password=await bcrypt.hash(req.body.password,10)
-
-user.resetToken=null
-
-user.resetTokenExpire=null
-
-await user.save()
-
-res.json({message:"password actualizado"})
-
+  res.json({ message: "Contraseña actualizada" })
 }
