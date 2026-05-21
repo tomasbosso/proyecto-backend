@@ -1,5 +1,5 @@
 const CartDAO = require("../dao/cart.dao")
-const Product = require("../models/Product")
+const Product = require("../models/product")
 const Ticket = require("../models/ticket")
 
 class CartRepository {
